@@ -1,0 +1,59 @@
+#ifndef PDF_H
+#define PDF_H
+
+#include "hittable_list.h"
+#include "onb.h"
+#include "rtweekend.h"
+
+class pdf {
+ public:
+  virtual ~pdf() {}
+
+  virtual double value(const vec3& direction) const = 0;
+  virtual vec3 generate() const = 0;
+};
+
+// 球面上均匀采样 pdf
+class sphere_pdf : public pdf {
+ public:
+  sphere_pdf() {}
+
+  double value(const vec3& direction) const override { return 1 / (4 * pi); }
+
+  vec3 generate() const override { return random_unit_vector(); }
+};
+// 球面上与法向cos(theta) pdf
+class cosine_pdf : public pdf {
+ public:
+  cosine_pdf(const vec3& w) { uvw.build_from_w(w); }
+
+  double value(const vec3& direction) const override {
+    auto cosine_theta = dot(unit_vector(direction), uvw.w());
+    return fmax(0, cosine_theta / pi);
+  }
+
+  vec3 generate() const override {
+    return uvw.local(random_cosine_direction());
+  }
+
+ private:
+  onb uvw;
+};
+// 在物体表面上按平面采样
+class hittable_pdf : public pdf {
+ public:
+  hittable_pdf(const hittable& _objects, const point3& _origin)
+      : objects(_objects), origin(_origin) {}
+
+  // 计算生成 direction 方向光线的概率pdf
+  double value(const vec3& direction) const override {
+    return objects.pdf_value(origin, direction);
+  }
+  // 按照规定的材料, 采样得到一个 随机的光线方向
+  vec3 generate() const override { return objects.random(origin); }
+
+ private:
+  const hittable& objects;
+  point3 origin;
+};
+#endif

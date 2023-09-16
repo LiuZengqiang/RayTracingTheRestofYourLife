@@ -168,4 +168,20 @@ inline vec3 refract(const vec3 &v, const vec3 &n, double etai_over_etat) {
   vec3 r_out_parallel = -sqrt(fabs(1.0 - r_out_perp.length_squared())) * n;
   return r_out_perp + r_out_parallel;
 }
+/**
+ * @brief 使用inverseCFD方法, 按 cos(theta)/pi 的概率在半球上采样
+ * 坐标系为: 上为正z, 右为正x, 指向屏幕外为正y
+ * theta为: 单位球上一点与正z单位向量的夹角
+ *
+ * @return vec3
+ */
+inline vec3 random_cosine_direction() {
+  auto r1 = random_double();
+  auto r2 = random_double();
+  auto phi = 2 * pi * r1;
+  auto x = cos(phi) * sqrt(r2);
+  auto y = sin(phi) * sqrt(r2);
+  auto z = sqrt(1 - r2);
+  return vec3(x, y, z);
+}
 #endif

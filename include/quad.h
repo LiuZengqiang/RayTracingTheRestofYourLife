@@ -29,6 +29,10 @@ class quad : public hittable {
     // 计算光线与平行四边形相交时的辅助量
     D = dot(normal, Q);
     w = n / dot(n, n);
+    area = n.length();
+    plane_origin = Q;
+    axis_A = _u;
+    axis_B = _v;
     set_bounding_box();
   }
 
@@ -65,6 +69,23 @@ class quad : public hittable {
     return true;  // To be implemented
   }
 
+  double pdf_value(const point3& origin, const vec3& v) const override {
+    hit_record rec;
+    // 如果无法击中 该平面
+    if (!this->hit(ray(origin, v), interval(0.001, infinity), rec)) return 0;
+
+    auto distance_squared = rec.t * rec.t * v.length_squared();
+    auto cosine = fabs(dot(v, rec.normal) / v.length());
+
+    return distance_squared / (cosine * area);
+  }
+  // 在 四边形上随机采样一点
+  vec3 random(const point3& origin) const override {
+    auto p =
+        plane_origin + (random_double() * axis_A) + (random_double() * axis_B);
+    return p - origin;
+  }
+
  private:
   point3 Q;                  // 平行四边形的 左下角
   vec3 u, v;                 // 平行四边形的 左/上 两条边(向量)
@@ -73,6 +94,10 @@ class quad : public hittable {
   vec3 normal;               // 平行四边形的法向, 等于 cross(u,v)
   double D;  // 计算光线与平行四边形相交时的辅助变量
   vec3 w;  // 计算光线与平行四边形相交点是否在四边形内部的辅助变量
+  double area;  // 矩形表示的面积
+  vec3 plane_origin;
+  vec3 axis_A;
+  vec3 axis_B;
 
   // 判断局部参数 a,b 是否合法(是否在[0,1]内)
   // 假如在, 则将参数a,b 赋值给 rec

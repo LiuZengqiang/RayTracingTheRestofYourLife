@@ -14,6 +14,7 @@
 #include "hittable.h"
 #include "hittable_list.h"
 #include "material.h"
+#include "pdf.h"
 #include "rtweekend.h"
 /**
  * @brief class camera
@@ -35,6 +36,7 @@ class camera {
 
   double defocus_angle = 0;  // 模拟实际相机的散射角度(以实现景深效果
   double focus_dist = 10;  // 模拟实际相机的理想焦距(以实现景深效果)
+  double recip_sqrt_spp;  // 1/sqrt(x), 其中x为一个像素内部的采样数
 
   /* Public Camera Parameters Here */
   /**
@@ -42,7 +44,7 @@ class camera {
    *
    * @param world
    */
-  void render(const hittable_list& world) {
+  void render(const hittable_list& world, const hittable_list& lights) {
     initialize();
     // Render
     std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
@@ -50,13 +52,23 @@ class camera {
       std::clog << "\rScanlines remaining: " << (image_height - j) << ' '
                 << std::flush;
       for (int i = 0; i < image_width; ++i) {
-        color pixel_color;
-        for (int sample = 0; sample < samples_per_pixel; sample++) {
-          // 计算像素(i,j)位置处的入射光线
-          auto r = get_ray(i, j);
-          // 光线跟踪主程序, 计算入射光线r经过"光线跟踪"后所附带的颜色值
-          pixel_color += ray_color(r, max_depth, world);
+        color pixel_color(0, 0, 0);
+        // 增加 jit 随机采样
+        int sqrt_ssp = sqrt(samples_per_pixel) + 1;
+        for (int s_j = 0; s_j < sqrt_ssp; s_j++) {
+          for (int s_i = 0; s_i < sqrt_ssp; s_i++) {
+            ray r = get_ray(i, j, s_i, s_j);
+            pixel_color += ray_color(r, max_depth, world, lights);
+          }
         }
+
+        // for (int sample = 0; sample < samples_per_pixel; sample++) {
+        //   // 计算像素(i,j)位置处的入射光线
+        //   auto r = get_ray(i, j);
+        //   // 光线跟踪主程序, 计算入射光线r经过"光线跟踪"后所附带的颜色值
+        //   pixel_color += ray_color(r, max_depth, world);
+        // }
+
         write_color(std::cout, pixel_color, samples_per_pixel);
       }
     }
@@ -81,7 +93,6 @@ class camera {
     // Calculate the image height, and ensure that it's at least 1.
     image_height = static_cast<int>(image_width / aspect_ratio);
     image_height = (image_height < 1) ? 1 : image_height;
-
     // Camera
     // 相机参数
     center = lookfrom;
@@ -127,6 +138,8 @@ class camera {
     defocus_disk_u = defocus_radius * u;
     // v方向的散焦向量
     defocus_disk_v = defocus_radius * v;
+    // 单位像素内部的光线数
+    recip_sqrt_spp = 1.0 / sqrt(samples_per_pixel);
   }
 
   /**
@@ -137,7 +150,8 @@ class camera {
    * @param world 世界场景
    * @return color
    */
-  color ray_color(const ray& r, int depth, const hittable_list& world) {
+  color ray_color(const ray& r, int depth, const hittable_list& world,
+                  const hittable_list& lights) {
     if (depth <= 0) {
       return color(0, 0, 0);
     }
@@ -150,12 +164,29 @@ class camera {
       ray scattered;
       // 物体材质颜色
       color attenuation;
+      // 样采的概率 pdf
+      double scattering_pdf = 1.0;
+
       // 物体自发光
-      color color_from_emission = rec.mat->emitted(rec.u, rec.v, rec.p);
-      if (rec.mat->scatter(r, rec, attenuation, scattered)) {
+      color color_from_emission = rec.mat->emitted(r, rec, rec.u, rec.v, rec.p);
+
+      if (rec.mat->scatter(r, rec, attenuation, scattered, scattering_pdf)) {
         // 如果材料存在反射, 则返回 自发光+物体颜色*反射光
-        return color_from_emission +
-               attenuation * ray_color(scattered, depth - 1, world);
+
+        hittable_pdf light_pdf(lights, rec.p);
+        scattered = ray(rec.p, light_pdf.generate(), r.time());
+
+        if (dot(scattered, rec.normal) < 0) return color_from_emission;
+
+        double pdf_val = light_pdf.value(scattered.direction());
+        std::clog << pdf_val << " \n";
+        if (pdf_val <= 0.0000001) return color_from_emission + background;
+
+        color sample_color = ray_color(scattered, depth - 1, world, lights);
+
+        color color_from_scatter =
+            (attenuation * scattering_pdf * sample_color) / pdf_val;
+        return color_from_emission + color_from_scatter;
       } else {
         // 如果材料不存在反射, 则返回 自发光
         return color_from_emission;
@@ -179,9 +210,9 @@ class camera {
    * @param j
    * @return ray
    */
-  ray get_ray(int i, int j) const {
+  ray get_ray(int i, int j, int s_i, int s_j) const {
     auto pixel_center = pixel00_loc + i * pixel_delta_u + j * pixel_delta_v;
-    auto pixel_sample = pixel_center + pixel_sample_square();
+    auto pixel_sample = pixel_center + pixel_sample_square(s_i, s_j);
 
     auto ray_origin = (defocus_angle <= 0) ? center : defocus_disk_sample();
     auto ray_direction = pixel_sample - ray_origin;
@@ -194,9 +225,9 @@ class camera {
    *
    * @return vec3
    */
-  vec3 pixel_sample_square() const {
-    auto px = -0.5 + random_double();
-    auto py = -0.5 + random_double();
+  vec3 pixel_sample_square(int s_i, int s_j) const {
+    auto px = -0.5 + recip_sqrt_spp * (s_i + random_double());
+    auto py = -0.5 + recip_sqrt_spp * (s_j + random_double());
     return px * pixel_delta_u + py * pixel_delta_v;
   }
   /**
