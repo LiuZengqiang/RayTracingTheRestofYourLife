@@ -5,5 +5,9 @@
 mkdir build
 ./run.sh
 ```
-通过修改``run.sh``中的参数选择需要渲染的场景。运行完成后结果默认存储在``/build/image.ppm``中。  
+运行完成后结果默认存储在``/build/image.ppm``中。  
 ### 示例结果：  
+#### Cornel Box 1
+![Cornel Box1](./output/image1.png)  
+#### Cornel Box 2
+![Cornel Box2](./output/image2.png)
