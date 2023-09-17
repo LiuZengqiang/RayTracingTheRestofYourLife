@@ -25,6 +25,8 @@ int main() {
   auto white = make_shared<lambertian>(color(.73, .73, .73));
   auto green = make_shared<lambertian>(color(.12, .45, .15));
 
+  auto mirror = make_shared<metal>(color(1, 1, 1), 0.0);
+
   // 增加 Cornel Box 的墙壁
   world.add(make_shared<quad>(point3(555, 0, 0), vec3(0, 555, 0),
                               vec3(0, 0, 555), green));
@@ -37,34 +39,36 @@ int main() {
   world.add(make_shared<quad>(point3(0, 0, 555), vec3(555, 0, 0),
                               vec3(0, 555, 0), white));
 
-  // 在场景中增加两个四面体
-
-  // Box
+  // Box1
   shared_ptr<hittable> box1 =
-      box(point3(0, 0, 0), point3(165, 330, 165), white);
+      box(point3(0, 0, 0), point3(165, 330, 165), mirror);
+  // shared_ptr<material> aluminum =
+  //     make_shared<metal>(color(0.8, 0.85, 0.88), 0.0);
+  // shared_ptr<hittable> box1 =
+  //     box(point3(0, 0, 0), point3(165, 330, 165), aluminum);
   box1 = make_shared<rotate_y>(box1, 15);
   box1 = make_shared<translate>(box1, vec3(265, 0, 295));
   world.add(box1);
 
   // Glass Sphere
   auto glass = make_shared<dielectric>(1.5);
-  auto light = make_shared<diffuse_light>(color(15, 15, 15));
   world.add(make_shared<sphere>(point3(190, 90, 190), 90, glass));
 
+  auto light = make_shared<diffuse_light>(color(15, 15, 15));
+  // lights
+  // 用于指示场景中存在的光源的情况，并不作为场景中实际hittable跟光线进行交互
   hittable_list lights;
   lights.add(make_shared<quad>(point3(343, 554, 332), vec3(-130, 0, 0),
                                vec3(0, 0, -105), light));
-  // lights.add(make_shared<sphere>(point3(190, 90, 190), 90, light));
-
+  // 因此还需要将quad类型的光源加入到world中
   world.add(make_shared<quad>(point3(343, 554, 332), vec3(-130, 0, 0),
                               vec3(0, 0, -105), light));
-  // world.add(make_shared<sphere>(point3(190, 90, 190), 90, light));
   camera cam;
 
   cam.aspect_ratio = 1.0;
   cam.image_width = 400;
-  cam.samples_per_pixel = 50;
-  cam.max_depth = 5;
+  cam.samples_per_pixel = 1000;
+  cam.max_depth = 50;
   cam.background = color(0, 0, 0);
 
   cam.vfov = 40;

@@ -61,14 +61,6 @@ class camera {
             pixel_color += ray_color(r, max_depth, world, lights);
           }
         }
-
-        // for (int sample = 0; sample < samples_per_pixel; sample++) {
-        //   // 计算像素(i,j)位置处的入射光线
-        //   auto r = get_ray(i, j);
-        //   // 光线跟踪主程序, 计算入射光线r经过"光线跟踪"后所附带的颜色值
-        //   pixel_color += ray_color(r, max_depth, world);
-        // }
-
         write_color(std::cout, pixel_color, samples_per_pixel);
       }
     }
@@ -157,34 +149,45 @@ class camera {
     }
     hit_record rec;
 
-    // 如果击中场景中的某个物体
-    // 忽略距离在[0,0.001)范围内的交点，避免浮点运算误差
+    // 如果击中场景中的某个物体(忽略距离在[0,0.001)范围内的交点，避免浮点运算误差)
     if (world.hit(r, interval(0.001, infinity), rec)) {
       // 物体反射光线
       ray scattered;
+
       // 物体材质颜色
       color attenuation;
-      // 样采的概率 pdf
+
+      // 在rec点入射光方向为scattered, 反射到方向-r的能量占比
+      // 例如, 对于Lambert表面, 入射光方向为scattered, 那么从该方向入射的光中有
+      // scattering_pdf 比例的光从r方向射出(此时的scattering_pdf=cos(theta))
       double scattering_pdf = 1.0;
+
+      // 采样方向为scattered 的采样概率, 这是采样概率, 与scattering_pdf不同.
+      // 采样概率是我们人为规定的采样pdf计算的采样方向为scattered的概率,
+      // scattering_pdf 是物体的表面物理属性规定的.
+      // 例如: 对于Lambert表面, 其scattering_pdf计算函数为cos(theta),
+      // 但是光线采样我们可以使用半球面上均匀采样, 那么各个方向的pdf_val都等于
+      // 1/(2pi) 也可以使用cos(theta)分布采样,
+      // 那么此时对于任意方向scattering_pdf=pdf_val
       double pdf_val = 1.0;
       // 物体自发光
       color color_from_emission = rec.mat->emitted(r, rec, rec.u, rec.v, rec.p);
-      // scattering_pdf 是scatter方向的入射光射向r方向的比例
-      // pdf 是采样scatter方向光线的pdf值
 
-      // 如果材料存在反射, 则返回 自发光+物体颜色*反射光
+      // 记录交点位置处光线采样的信息
       scatter_record srec;
+      // 如果表面不支持反射(例如光源表面), 直接反射自发光
       if (!rec.mat->scatter(r, rec, srec)) return color_from_emission;
 
-      // 如果是类似镜面的表面, 直接确定scatter 光线
+      // 如果是类似镜面的表面, 直接确定scattered光线方向, 不必再采样
       if (srec.skip_pdf) {
         return srec.attenuation *
                ray_color(srec.skip_pdf_ray, depth - 1, world, lights);
       }
 
-      // 光采样
+      // 光采样类
       auto light_ptr = make_shared<hittable_pdf>(lights, rec.p);
-      // 综合 光采样 和 局部采样
+
+      // 综合 光采样 和 局部表面采样
       mixture_pdf p(light_ptr, srec.pdf_ptr);
 
       scattered = ray(rec.p, p.generate(), r.time());
@@ -194,29 +197,26 @@ class camera {
       pdf_val = p.value(scattered.direction());
 
       color sample_color = ray_color(scattered, depth - 1, world, lights);
+      // 根据 Monte Carlo 方程: ∫f(x)dx = 1/N*sum(f(xi)/p(xi)). 其中:
+      // attenuation*scattering_pdf*sample_color 为 f(xi)
+      // pdf_val 为 p(xi)
       color color_from_scatter =
           (srec.attenuation * scattering_pdf * sample_color) / pdf_val;
-
       return color_from_emission + color_from_scatter;
-
-    } else {
-      // 如果没有击中场景中的物体, 则返回场景背景
-      return background;
     }
 
-    // 如果没有击中场景中的物体，就假设击中天空，天空的颜色是一个偏向于蓝色的随机值
-    vec3 unit_direction = unit_vector(r.direction());
-    auto a = 0.5 * (unit_direction.y() + 1.0);
-    return (1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0);
+    // 如果没有击中场景中的物体, 则返回场景背景
+    return background;
   }
 
   /**
    * @brief 得到一条从相机到像素(i,j)的入射光线,
    *        该光线包含"相机镜头内随机采样(散焦)"和"像素内随机采样"两个随机采样
-   *
-   * @param i
+   * @param i 像素位置(i,j)
    * @param j
-   * @return ray
+   * @param s_i 像素(i,j)内的位置(s_i,s_j)
+   * @param s_j
+   * @return
    */
   ray get_ray(int i, int j, int s_i, int s_j) const {
     auto pixel_center = pixel00_loc + i * pixel_delta_u + j * pixel_delta_v;
@@ -224,7 +224,6 @@ class camera {
 
     auto ray_origin = (defocus_angle <= 0) ? center : defocus_disk_sample();
     auto ray_direction = pixel_sample - ray_origin;
-    // 生成有time属性的ray
     auto ray_time = random_double();
     return ray(ray_origin, ray_direction, ray_time);
   }

@@ -30,9 +30,6 @@ class quad : public hittable {
     D = dot(normal, Q);
     w = n / dot(n, n);
     area = n.length();
-    plane_origin = Q;
-    axis_A = _u;
-    axis_B = _v;
     set_bounding_box();
   }
 
@@ -81,8 +78,7 @@ class quad : public hittable {
   }
   // 在 四边形上随机采样一点
   vec3 random(const point3& origin) const override {
-    auto p =
-        plane_origin + (random_double() * axis_A) + (random_double() * axis_B);
+    auto p = Q + (random_double() * u) + (random_double() * v);
     return p - origin;
   }
 
@@ -95,9 +91,6 @@ class quad : public hittable {
   double D;  // 计算光线与平行四边形相交时的辅助变量
   vec3 w;  // 计算光线与平行四边形相交点是否在四边形内部的辅助变量
   double area;  // 矩形表示的面积
-  vec3 plane_origin;
-  vec3 axis_A;
-  vec3 axis_B;
 
   // 判断局部参数 a,b 是否合法(是否在[0,1]内)
   // 假如在, 则将参数a,b 赋值给 rec

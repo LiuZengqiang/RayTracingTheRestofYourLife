@@ -90,20 +90,17 @@ class sphere : public hittable {
   }
 
   aabb bounding_box() const override { return bbox; }
-  // 在球面均匀上采样一点的概率(pdf)
+  // 在球面上o点可见范围内部均匀采样一点的概率
   double pdf_value(const point3& o, const vec3& v) const override {
     // This method only works for stationary spheres.
-
     hit_record rec;
     if (!this->hit(ray(o, v), interval(0.001, infinity), rec)) return 0;
-
     auto cos_theta_max =
         sqrt(1 - radius * radius / (center1 - o).length_squared());
     auto solid_angle = 2 * pi * (1 - cos_theta_max);
-
     return 1 / solid_angle;
   }
-  // 在球面上均匀采样一点
+  // 在球面上且o点可见范围上均匀采样一点
   vec3 random(const point3& o) const override {
     vec3 direction = center1 - o;
     auto distance_squared = direction.length_squared();
@@ -137,6 +134,7 @@ class sphere : public hittable {
     u = phi / (2 * pi);
     v = theta / pi;
   }
+  // 在球面上并且o点可见范围上均匀采样一个点
   static vec3 random_to_sphere(double radius, double distance_squared) {
     auto r1 = random_double();
     auto r2 = random_double();

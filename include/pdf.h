@@ -5,10 +5,15 @@
 #include "onb.h"
 #include "rtweekend.h"
 
+/**
+ * @brief 光线采样类
+ * 必须实现两个函数:
+ * value(direction): 计算采样光线为direction时的采样概率
+ * generate(): 按照特定的pdf采样得到一条光线
+ */
 class pdf {
  public:
   virtual ~pdf() {}
-
   virtual double value(const vec3& direction) const = 0;
   virtual vec3 generate() const = 0;
 };
@@ -22,6 +27,7 @@ class sphere_pdf : public pdf {
 
   vec3 generate() const override { return random_unit_vector(); }
 };
+
 // 球面上与法向cos(theta) pdf
 class cosine_pdf : public pdf {
  public:
@@ -39,6 +45,7 @@ class cosine_pdf : public pdf {
  private:
   onb uvw;
 };
+
 // 在物体表面上按平面采样
 class hittable_pdf : public pdf {
  public:
@@ -57,7 +64,7 @@ class hittable_pdf : public pdf {
   point3 origin;
 };
 
-// 混合 pdf
+// 混合两种 pdf
 class mixture_pdf : public pdf {
  public:
   mixture_pdf(shared_ptr<pdf> p0, shared_ptr<pdf> p1) {
