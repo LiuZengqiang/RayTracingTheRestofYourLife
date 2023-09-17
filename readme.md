@@ -11,3 +11,5 @@ mkdir build
 ![Cornel Box1](./output/image1.png)  
 #### Cornel Box 2
 ![Cornel Box2](./output/image2.png)
+#### Cornel Box 3
+![Cornel Box3](./output/image3.png)
