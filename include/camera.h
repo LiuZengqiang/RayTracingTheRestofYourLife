@@ -44,7 +44,7 @@ class camera {
    *
    * @param world
    */
-  void render(const hittable_list& world, const hittable_list& lights) {
+  void render(const hittable& world, const hittable& lights) {
     initialize();
     // Render
     std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
@@ -150,8 +150,8 @@ class camera {
    * @param world 世界场景
    * @return color
    */
-  color ray_color(const ray& r, int depth, const hittable_list& world,
-                  const hittable_list& lights) {
+  color ray_color(const ray& r, int depth, const hittable& world,
+                  const hittable& lights) {
     if (depth <= 0) {
       return color(0, 0, 0);
     }
@@ -166,31 +166,39 @@ class camera {
       color attenuation;
       // 样采的概率 pdf
       double scattering_pdf = 1.0;
-
+      double pdf_val = 1.0;
       // 物体自发光
       color color_from_emission = rec.mat->emitted(r, rec, rec.u, rec.v, rec.p);
+      // scattering_pdf 是scatter方向的入射光射向r方向的比例
+      // pdf 是采样scatter方向光线的pdf值
 
-      if (rec.mat->scatter(r, rec, attenuation, scattered, scattering_pdf)) {
-        // 如果材料存在反射, 则返回 自发光+物体颜色*反射光
+      // 如果材料存在反射, 则返回 自发光+物体颜色*反射光
+      scatter_record srec;
+      if (!rec.mat->scatter(r, rec, srec)) return color_from_emission;
 
-        hittable_pdf light_pdf(lights, rec.p);
-        scattered = ray(rec.p, light_pdf.generate(), r.time());
-
-        if (dot(scattered, rec.normal) < 0) return color_from_emission;
-
-        double pdf_val = light_pdf.value(scattered.direction());
-        std::clog << pdf_val << " \n";
-        if (pdf_val <= 0.0000001) return color_from_emission + background;
-
-        color sample_color = ray_color(scattered, depth - 1, world, lights);
-
-        color color_from_scatter =
-            (attenuation * scattering_pdf * sample_color) / pdf_val;
-        return color_from_emission + color_from_scatter;
-      } else {
-        // 如果材料不存在反射, 则返回 自发光
-        return color_from_emission;
+      // 如果是类似镜面的表面, 直接确定scatter 光线
+      if (srec.skip_pdf) {
+        return srec.attenuation *
+               ray_color(srec.skip_pdf_ray, depth - 1, world, lights);
       }
+
+      // 光采样
+      auto light_ptr = make_shared<hittable_pdf>(lights, rec.p);
+      // 综合 光采样 和 局部采样
+      mixture_pdf p(light_ptr, srec.pdf_ptr);
+
+      scattered = ray(rec.p, p.generate(), r.time());
+
+      scattering_pdf = rec.mat->scattering_pdf(r, rec, scattered);
+
+      pdf_val = p.value(scattered.direction());
+
+      color sample_color = ray_color(scattered, depth - 1, world, lights);
+      color color_from_scatter =
+          (srec.attenuation * scattering_pdf * sample_color) / pdf_val;
+
+      return color_from_emission + color_from_scatter;
+
     } else {
       // 如果没有击中场景中的物体, 则返回场景背景
       return background;

@@ -13,10 +13,20 @@
 #include "color.h"
 #include "hittable.h"
 #include "onb.h"
+#include "pdf.h"
 #include "rtweekend.h"
 #include "texture.h"
 
 class hit_record;
+
+// 记录 散射光属性
+class scatter_record {
+ public:
+  color attenuation;
+  shared_ptr<pdf> pdf_ptr;
+  bool skip_pdf;
+  ray skip_pdf_ray;
+};
 /**
  * @brief 材料类, 所有特定的材料都必须继承该类并实现其中的
  * scatter() 函数, 如果材料有自发光可以重载 emitted() 函数
@@ -25,20 +35,19 @@ class hit_record;
 class material {
  public:
   virtual ~material() = default;
+
   /**
    * @brief 计算入射光线照射到该材料上的行为, 若存在反射光线返回true,
    * 没有反射光线返回false
-   *
-   * @param r_in 入射光线
-   * @param rec 交点
-   * @param attenuation 若存在光线衰减, 衰减系数记录在此变量内
-   * @param scattered 反射光线记录在此变量内
-   * @return true
-   * @return false
+   * @param r_in
+   * @param rec
+   * @param srec
+   * @return
    */
   virtual bool scatter(const ray& r_in, const hit_record& rec,
-                       color& attenuation, ray& scattered,
-                       double& pdf) const = 0;
+                       scatter_record& srec) const {
+    return false;
+  }
   virtual double scattering_pdf(const ray& r_in, const hit_record& rec,
                                 const ray& scattered) const {
     return 0;
@@ -71,18 +80,14 @@ class lambertian : public material {
   lambertian(const color& a) : albedo(make_shared<solid_color>(a)) {}
   lambertian(shared_ptr<texture> _texture) : albedo(_texture){};
 
-  // 此处的 pdf 表示采样得到该方向光线的概率
-  bool scatter(const ray& r_in, const hit_record& rec, color& attenuation,
-               ray& scattered, double& pdf) const override {
-    // 尝试使用 cos 分布采样
-    onb uvw;
-    uvw.build_from_w(rec.normal);
-    auto scatter_direction = uvw.local(random_cosine_direction());
-    scattered = ray(rec.p, unit_vector(scatter_direction), r_in.time());
-    attenuation = albedo->value(rec.u, rec.v, rec.p);
-    pdf = dot(uvw.w(), scattered.direction()) / pi;
+  bool scatter(const ray& r_in, const hit_record& rec,
+               scatter_record& srec) const override {
+    srec.attenuation = albedo->value(rec.u, rec.v, rec.p);
+    srec.pdf_ptr = make_shared<cosine_pdf>(rec.normal);
+    srec.skip_pdf = false;
     return true;
   }
+
   // 此处的 scattering_pdf 表示 从 scattered 入射的光射向 r_in 方向的占比
   double scattering_pdf(const ray& r_in, const hit_record& rec,
                         const ray& scattered) const override {
@@ -103,14 +108,24 @@ class lambertian : public material {
 class metal : public material {
  public:
   metal(const color& a, double f) : albedo(a), fuzz(f < 1 ? f : 1) {}
-  bool scatter(const ray& r_in, const hit_record& rec, color& attenuation,
-               ray& scattered, double& pdf) const override {
-    // 理想反射光线方向
+  // bool scatter(const ray& r_in, const hit_record& rec, color& attenuation,
+  //              ray& scattered, double& pdf) const override {
+  //   // 理想反射光线方向
+  //   vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
+  //   scattered =
+  //       ray(rec.p, reflected + fuzz * random_unit_vector(), r_in.time());
+  //   attenuation = albedo;
+  //   return (dot(scattered.direction(), rec.normal) > 0);
+  // }
+  bool scatter(const ray& r_in, const hit_record& rec,
+               scatter_record& srec) const override {
+    srec.attenuation = albedo;
+    srec.pdf_ptr = nullptr;
+    srec.skip_pdf = true;
     vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
-    scattered =
-        ray(rec.p, reflected + fuzz * random_unit_vector(), r_in.time());
-    attenuation = albedo;
-    return (dot(scattered.direction(), rec.normal) > 0);
+    srec.skip_pdf_ray =
+        ray(rec.p, reflected + fuzz * random_in_unit_sphere(), r_in.time());
+    return true;
   }
 
  private:
@@ -126,9 +141,12 @@ class metal : public material {
 class dielectric : public material {
  public:
   dielectric(double _etai_over_etat) : etai_over_etat(_etai_over_etat) {}
-  bool scatter(const ray& r_in, const hit_record& rec, color& attenuation,
-               ray& scattered, double& pdf) const override {
-    attenuation = color(1.0, 1.0, 1.0);
+
+  bool scatter(const ray& r_in, const hit_record& rec,
+               scatter_record& srec) const override {
+    srec.attenuation = color(1.0, 1.0, 1.0);
+    srec.pdf_ptr = nullptr;
+    srec.skip_pdf = true;
     // 根据入射光的方向进行判断 eta/eta' 的值
     double refraction_ratio =
         rec.front_face ? (1.0 / etai_over_etat) : (etai_over_etat);
@@ -148,7 +166,7 @@ class dielectric : public material {
       // 若为折射
       direction = refract(unit_direction, rec.normal, refraction_ratio);
     }
-    scattered = ray(rec.p, direction, r_in.time());
+    srec.skip_pdf_ray = ray(rec.p, direction, r_in.time());
     return true;
   }
 
@@ -173,11 +191,6 @@ class diffuse_light : public material {
   diffuse_light(shared_ptr<texture> a) : emit(a) {}
   diffuse_light(color c) : emit(make_shared<solid_color>(c)) {}
 
-  bool scatter(const ray& r_in, const hit_record& rec, color& attenuation,
-               ray& scattered, double& pdf) const override {
-    return false;
-  }
-
   color emitted(const ray& r_in, const hit_record& rec, double u, double v,
                 const point3& p) const override {
     // 添加约束, 只有跟光源的正面相交, 才反射光线
@@ -198,12 +211,12 @@ class isotropic : public material {
   isotropic(color c) : albedo(make_shared<solid_color>(c)) {}
   isotropic(shared_ptr<texture> a) : albedo(a) {}
 
-  bool scatter(const ray& r_in, const hit_record& rec, color& attenuation,
-               ray& scattered, double& pdf) const override {
-    // 反射光线在一个单元球内均匀的分布
-    scattered = ray(rec.p, random_unit_vector(), r_in.time());
-    attenuation = albedo->value(rec.u, rec.v, rec.p);
-    pdf = 1 / (4 * pi);
+  bool scatter(const ray& r_in, const hit_record& rec,
+               scatter_record& srec) const override {
+    srec.attenuation = albedo->value(rec.u, rec.v, rec.p);
+    // 使用球面上采样
+    srec.pdf_ptr = make_shared<sphere_pdf>();
+    srec.skip_pdf = false;
     return true;
   }
   // 此处的 scattering_pdf 表示 从 scattered 入射的光射向 r_in 方向的占比
